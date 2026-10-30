@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BOLETERIA</title>
+<meta name="description" content="Boletería de Club Museum: carga de tarjetas de mesa">
+<meta name="theme-color" content="#15161B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BOLETERIA">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icono-180.png">
+<link rel="icon" type="image/png" href="icono-192.png">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<header class="barra">
+  <img src="logo.jpg" alt="" class="logo">
+  <span class="marca">CLUB MUSEUM</span>
+  <button id="btnTema" class="icono-btn" aria-label="Tema" title="Tema"></button>
+  <div id="menuTema" class="menu" hidden>
+    <button data-tema="claro">Modo claro</button>
+    <button data-tema="oscuro">Modo oscuro</button>
+    <button data-tema="sistema">Automático (según el sistema)</button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ============================== COBRAR -->
+  <section id="pCobro" class="panel">
+    <div class="seccion">
+      <h2>Datos</h2>
+      <div class="fila2">
+        <label class="campo"><span>Cajero</span><input id="cajero" autocomplete="off" enterkeyhint="next"></label>
+        <label class="campo"><span>Mesa / cliente</span><input id="mesa" autocomplete="off" enterkeyhint="next"></label>
+      </div>
+    </div>
+
+    <div class="seccion">
+      <h2>Mesa</h2>
+      <label class="campo monto"><span>TOTAL DE LA MESA</span><input id="total" inputmode="decimal" autocomplete="off" enterkeyhint="next"></label>
+    </div>
+
+    <div class="seccion">
+      <h2>Seña</h2>
+      <label class="interruptor">
+        <span>¿La mesa tiene SEÑA?</span>
+        <input type="checkbox" id="haySena"><i></i>
+      </label>
+      <div id="bloqueSena" hidden>
+        <label class="campo monto"><span>SEÑA</span><input id="sena" inputmode="decimal" autocomplete="off" enterkeyhint="next"></label>
+        <div class="etiqueta">La seña se pagó:</div>
+        <div class="segmentos" id="senaMedio">
+          <button data-v="efectivo" class="activo">En efectivo</button>
+          <button data-v="digital">Medio digital</button>
+        </div>
+      </div>
+      <hr>
+      <div class="fila-monto fuerte"><span>Saldo a pagar (total − seña)</span><b id="saldo">$ 0,00</b></div>
+    </div>
+
+    <div class="seccion">
+      <h2>Pago del saldo</h2>
+      <label class="campo monto"><span>Paga en efectivo</span><input id="efectivo" inputmode="decimal" autocomplete="off" enterkeyhint="next"></label>
+      <label class="campo monto"><span>Paga con tarjeta / medio digital</span><input id="digital" inputmode="decimal" autocomplete="off" enterkeyhint="done"></label>
+      <div class="fila2">
+        <button class="btn-borde" id="todoEfectivo">Todo efectivo</button>
+        <button class="btn-borde" id="todoDigital">Todo digital</button>
+      </div>
+      <div class="aviso-error" id="dif" hidden></div>
+    </div>
+
+    <div class="tarjeta principal">
+      <h3>COBRARLE AL CLIENTE</h3>
+      <div class="resultado"><i class="punto efectivo"></i><span>En efectivo</span><b id="rEfectivo" class="c-efectivo">$ 0,00</b></div>
+      <div class="resultado"><i class="punto digital"></i><span>Medio digital</span><b id="rDigital" class="c-digital">$ 0,00</b></div>
+      <hr>
+      <div class="fila-monto total"><span>TOTAL A COBRAR</span><b id="rTotal">$ 0,00</b></div>
+      <p class="nota" id="notaSena" hidden></p>
+    </div>
+
+    <div class="tarjeta secundaria">
+      <h3>CARGAR EN LA TARJETA DE MESA</h3>
+      <div class="carga"><span>CARGAR CONSUMO EN TARJETA:</span><b id="rConsumo">$ 0,00</b></div>
+      <div class="carga"><span>CARGAR FEE EN TARJETA:</span><b id="rFee">$ 0,00</b></div>
+      <p class="nota" id="notaFee" hidden></p>
+    </div>
+
+    <div class="fila-acciones">
+      <button class="btn-borde grande" id="limpiar">Limpiar</button>
+      <button class="btn grande" id="registrar">Registrar carga</button>
+    </div>
+    <p class="aviso-error centro" id="error" hidden></p>
+  </section>
+
+  <!-- ============================== HISTORIAL -->
+  <section id="pHistorial" class="panel">
+    <div class="segmentos" id="filtro">
+      <button data-v="turno" class="activo">Turno actual</button>
+      <button data-v="todo">Todo</button>
+    </div>
+    <div class="seccion" id="resumen"></div>
+    <div class="fila2">
+      <button class="btn" id="expPdf">Exportar PDF</button>
+      <button class="btn" id="expExcel">Exportar Excel</button>
+    </div>
+    <div id="lista"></div>
+    <button class="btn-texto peligro" id="borrarTodo" hidden>Borrar todo el historial</button>
+  </section>
+</main>
+
+<nav class="pestanas" id="pestanas">
+  <button data-p="cobro" class="activo"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z M3 10h18" fill="none" stroke="currentColor" stroke-width="2"/></svg>Cobrar</button>
+  <button data-p="historial"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2 M21 12a9 9 0 1 1-3-6.7 M21 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Historial</button>
+</nav>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="logica.js"></script>
+<script src="exportar.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
