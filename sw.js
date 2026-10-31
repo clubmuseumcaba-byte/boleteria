@@ -1,6 +1,6 @@
 // Guarda la app en el teléfono para que abra sin internet.
 // Al publicar una versión nueva, cambiar VERSION para que los teléfonos la descarguen.
-const VERSION = 'boleteria-v1';
+const VERSION = 'boleteria-v3';
 const ARCHIVOS = [
   './', 'index.html', 'estilo.css', 'logica.js', 'exportar.js', 'app.js', 'manifest.webmanifest',
   'logo.jpg', 'logo-pdf.jpg', 'icono-180.png', 'icono-192.png', 'icono-512.png',

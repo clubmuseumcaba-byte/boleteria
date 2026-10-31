@@ -14,9 +14,16 @@ const almacen = {
   },
 };
 
+const nuevoUid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+
 let historial = [];
 try { historial = JSON.parse(almacen.leer('historial') || '[]'); } catch { historial = []; }
 const guardarHistorial = () => almacen.escribir('historial', JSON.stringify(historial));
+// Cada carga lleva un identificador único, para que la planilla no la anote dos veces.
+if (historial.some((c) => !c.uid)) {
+  historial.forEach((c) => { if (!c.uid) c.uid = nuevoUid(); });
+  guardarHistorial();
+}
 
 // Pide que el navegador no borre los datos por falta de espacio.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -132,7 +139,9 @@ function pintarCobro() {
   if (r.fee > 0) {
     nota = `FEE = ${DESCUENTO_DIGITAL_PCT} % de ${money(r.totalDigital)} pagado por medio digital` +
       (r.senaDigital && r.sena > 0 ? ' (incluye la seña)' : '');
-  } else if (r.senaDigital && r.sena > 0 && r.saldo > 0) {
+  } else if (r.sena > 0 && r.saldo <= 0) {
+    nota = 'La seña cubre toda la mesa: va todo al consumo, sin FEE';
+  } else if (r.senaDigital && r.sena > 0) {
     nota = 'El saldo se paga todo en efectivo: va todo al consumo, sin FEE (aunque la seña fue digital)';
   }
   $('notaFee').hidden = !nota;
@@ -202,7 +211,7 @@ $('registrar').addEventListener('click', () => {
   }
   const ahora = Date.now();
   historial.unshift({
-    id: ahora, fecha: ahora,
+    id: ahora, uid: nuevoUid(), fecha: ahora,
     cajero: $('cajero').value.trim(), mesa: $('mesa').value.trim(),
     total: r.total, sena: r.sena, senaDigital: r.senaDigital, efectivo: r.efectivo, digital: r.digital,
   });
@@ -211,6 +220,7 @@ $('registrar').addEventListener('click', () => {
   pintarHistorial();
   window.scrollTo(0, 0);
   aviso(`Carga registrada: consumo ${money(r.consumo)} + FEE ${money(r.fee)}`);
+  sincronizar();
 });
 
 // ============================================================ HISTORIAL
@@ -262,6 +272,7 @@ function pintarHistorial() {
       <div class="det"><b>Consumo ${money(d.consumo)} + FEE ${money(d.fee)}</b></div>
       ${c.sena > 0 ? `<div class="det">Seña ${money(c.sena)} (${senaPor(c).toLowerCase()})</div>` : ''}
       <div class="pagos"><span class="c-efectivo">Saldo efectivo ${money(c.efectivo)}</span><span class="c-digital">Saldo digital ${money(c.digital)}</span></div>
+      ${conexion && !c.enviada ? '<div class="chip-pend">⏳ Pendiente de enviar a la planilla</div>' : ''}
     </div><button class="borrar" data-id="${c.id}" aria-label="Borrar">${ICONO_BORRAR}</button></div>`;
   }).join('');
 }
@@ -273,15 +284,138 @@ $('lista').addEventListener('click', (e) => {
   if (!c || !confirm(`¿Borrar esta carga?\n\n${fechaHora(c.fecha)} — ${money(c.total)}. No se puede deshacer.`)) return;
   historial = historial.filter((x) => x !== c);
   guardarHistorial();
+  // Si ya estaba en la planilla, allá queda marcada como BORRADA.
+  if (c.enviada) {
+    borradasPendientes.push({ uid: c.uid, cuando: Date.now() });
+    guardarBorradas();
+    sincronizar();
+  }
   pintarHistorial();
 });
 
 $('borrarTodo').addEventListener('click', () => {
-  if (!confirm(`¿Borrar todo el historial?\n\nSe eliminan las ${historial.length} cargas guardadas. Exportalo antes si lo necesitás. No se puede deshacer.`)) return;
+  const sinEnviar = conexion ? historial.filter((c) => !c.enviada).length : 0;
+  const extra = sinEnviar ? `\n\nAtención: ${sinEnviar} cargas todavía no llegaron a la planilla y se van a perder.` : '';
+  if (!confirm(`¿Borrar todo el historial de este teléfono?\n\nSe eliminan las ${historial.length} cargas guardadas. Exportalo antes si lo necesitás. No se puede deshacer.` +
+    (conexion ? ' Las que ya están en la planilla quedan allá.' : '') + extra)) return;
   historial = [];
   guardarHistorial();
   pintarHistorial();
 });
+
+// ============================================================ PLANILLA (Google Sheets)
+
+let conexion = null; // { u: url del script, k: clave }
+try { conexion = JSON.parse(almacen.leer('conexion') || 'null'); } catch { conexion = null; }
+let borradasPendientes = [];
+try { borradasPendientes = JSON.parse(almacen.leer('borradas') || '[]'); } catch { borradasPendientes = []; }
+const guardarBorradas = () => almacen.escribir('borradas', JSON.stringify(borradasPendientes));
+let ultimoError = null;
+let enviando = false;
+
+/** "BOLETERIA-<base64>" → { u, k }, o null si el código no es válido. */
+function leerCodigo(texto) {
+  try {
+    let s = texto.replace(/\s/g, '').replace(/^BOLETERIA-/i, '');
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    const c = JSON.parse(decodeURIComponent(escape(atob(s))));
+    const valida = /^https:\/\//.test(c.u) || /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(c.u); // local: solo pruebas
+    return c && valida && c.k ? { u: c.u, k: c.k } : null;
+  } catch { return null; }
+}
+
+const pendientes = () => historial.filter((c) => !c.enviada);
+
+function paraPlanilla(c) {
+  const d = detalle(c);
+  return {
+    uid: c.uid, fecha: c.fecha, cajero: c.cajero, mesa: c.mesa, total: c.total, sena: c.sena, senaPor: senaPor(c),
+    efectivo: c.efectivo, digital: c.digital, totalDigital: d.totalDigital, consumo: d.consumo, fee: d.fee,
+  };
+}
+
+/** Manda lo pendiente. Si no hay señal o falla, queda guardado y se reintenta solo. */
+async function sincronizar(manual = false) {
+  if (!conexion || enviando) return;
+  const cargas = pendientes().slice(0, 200);
+  const borradas = borradasPendientes.slice(0, 200);
+  if (!cargas.length && !borradas.length) { ultimoError = null; pintarNube(); if (manual) aviso('No hay nada pendiente: todo está en la planilla.'); return; }
+  if (!navigator.onLine) { ultimoError = 'Sin conexión a internet'; pintarNube(); if (manual) aviso('Sin internet: se envía solo cuando vuelva la señal.'); return; }
+  enviando = true;
+  try {
+    const r = await fetch(conexion.u, {
+      method: 'POST',
+      // text/plain evita la consulta previa (CORS) que Google no responde.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ k: conexion.k, cargas: cargas.map(paraPlanilla), borradas }),
+    });
+    const res = await r.json();
+    if (!res.ok) throw new Error(res.error === 'clave' ? 'El código de activación no es válido' : res.error || 'Error de la planilla');
+    const ok = new Set(res.recibidas || []);
+    historial.forEach((c) => { if (ok.has(c.uid)) c.enviada = true; });
+    guardarHistorial();
+    const okB = new Set(res.borradas || []);
+    borradasPendientes = borradasPendientes.filter((b) => !okB.has(b.uid));
+    guardarBorradas();
+    ultimoError = null;
+    if (manual) aviso('Enviado a la planilla.');
+  } catch (e) {
+    ultimoError = e.message === 'Failed to fetch' || e.name === 'TypeError' ? 'No se pudo conectar con la planilla' : e.message;
+    if (manual) aviso(ultimoError);
+  } finally {
+    enviando = false;
+    pintarNube();
+    pintarHistorial();
+  }
+  // Si quedó más (más de 200 de una vez), sigue.
+  if (!ultimoError && (pendientes().length || borradasPendientes.length)) sincronizar(manual);
+}
+
+function pintarNube() {
+  const n = pendientes().length + borradasPendientes.length;
+  const punto = $('nubeEstado');
+  punto.className = !conexion ? 'apagada' : n ? 'pendiente' : 'ok';
+  $('planillaConectada').hidden = !conexion;
+  $('planillaSinConectar').hidden = !!conexion;
+  if (conexion) {
+    $('planillaEstado').textContent = n
+      ? `Conectada. Faltan enviar ${n} ${n === 1 ? 'movimiento' : 'movimientos'}${ultimoError ? ` (${ultimoError})` : ''}. Se envían solos cuando hay internet.`
+      : 'Conectada. Todas las cargas están en la planilla.';
+  }
+}
+
+$('btnNube').addEventListener('click', (e) => {
+  e.stopPropagation();
+  pintarNube();
+  $('dlgPlanilla').showModal();
+});
+$('cerrarPlanilla').addEventListener('click', () => $('dlgPlanilla').close());
+$('enviarAhora').addEventListener('click', () => sincronizar(true));
+$('activar').addEventListener('click', () => {
+  const c = leerCodigo($('codigoActivacion').value);
+  if (!c) { aviso('Ese código no es válido. Copialo completo, tal cual te lo mandaron.'); return; }
+  conexion = c;
+  almacen.escribir('conexion', JSON.stringify(c));
+  $('codigoActivacion').value = '';
+  pintarNube();
+  pintarHistorial();
+  aviso('Conectada a la planilla.');
+  sincronizar(true);
+});
+$('desconectar').addEventListener('click', () => {
+  const n = pendientes().length;
+  if (!confirm('¿Desconectar este teléfono de la planilla?' +
+    (n ? `\n\nHay ${n} cargas que todavía no se enviaron y no van a llegar a la planilla.` : ''))) return;
+  conexion = null;
+  try { localStorage.removeItem('boleteria.conexion'); } catch {}
+  pintarNube();
+  pintarHistorial();
+});
+
+// Reintentos: al volver la señal, al volver a la app y cada minuto.
+window.addEventListener('online', () => sincronizar());
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizar(); });
+setInterval(() => sincronizar(), 60000);
 
 // ---------- Exportar: en el iPhone abre el menú Compartir (WhatsApp, Mail, Archivos…)
 
@@ -330,6 +464,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) pint
 
 pintarCobro();
 pintarHistorial();
+pintarNube();
+sincronizar();
 
 // ---------- Funciona sin internet
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

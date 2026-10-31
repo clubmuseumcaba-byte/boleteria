@@ -9,7 +9,8 @@ const montosIguales = (a, b) => Math.abs(a - b) < 0.005;
 
 /**
  * Reparte el total de la mesa entre CONSUMO y FEE.
- * Si el saldo en boletería se paga todo en efectivo, va todo al consumo (FEE 0), aunque la seña haya sido digital.
+ * Si en boletería no se paga nada por medio digital (saldo todo en efectivo, o la seña cubre toda la mesa),
+ * va todo al consumo (FEE 0), aunque la seña haya sido digital.
  * Si no, FEE = 15 % de todo lo pagado por medio digital (seña incluida si fue digital); CONSUMO = total − FEE.
  */
 function calcularFee(senaDigital, saldoDigital) {
